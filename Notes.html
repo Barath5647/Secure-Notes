@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Secure Message Tool</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="./openpgp.min.js"></script>
+
+
+<style>
+body {
+  font-family: system-ui, -apple-system;
+  background: #0f172a;
+  color: #e5e7eb;
+  padding: 20px;
+}
+
+.hidden { display: none; }
+
+#decoyScreen {
+  padding: 16px;
+}
+
+#decoyNotes {
+  width: 100%;
+  height: 70vh;
+  font-size: 16px;
+  border: none;
+  outline: none;
+}
+
+
+h2 { text-align: center; margin-bottom: 10px; }
+
+textarea, input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  font-size: 17px;
+  border-radius: 10px;
+  border: none;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.encrypt { background: #22c55e; color: #000; }
+.decrypt { background: #38bdf8; color: #000; }
+.panic { background: #ef4444; color: #fff; }
+
+.tabs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.tabs button {
+  flex: 1;
+  background: #1e293b;
+  color: #e5e7eb;
+}
+
+.note {
+  font-size: 13px;
+  opacity: 0.8;
+  text-align: center;
+}
+
+#saveBtn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  font-size: 16px;
+  border-radius: 8px;
+  border: none;
+  background: #007aff;
+  color: white;
+}
+
+#saveBtn:active {
+  background: #005fd1;
+}
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.8);
+  color: white;
+  padding: 8px 14px;
+  border-radius: 20px;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.toast.show {
+  opacity: 1;
+}
+
+
+</style>
+</head>
+
+<body>
+
+<!-- SCREEN -->
+<!-- DECOY SCREEN -->
+<div id="decoyScreen">
+  <h2>📝 Notes</h2>
+
+  <textarea id="decoyNotes" placeholder="Notes…
+• Grocery
+• Reminder
+• Thoughts"></textarea>
+
+  <button id="saveBtn">💾 Save</button>
+  <div id="savedToast" class="toast hidden">Saved ✓</div>
+  
+
+  <p class="note">Notes saved locally</p>
+</div>
+
+
+<!-- PIN LOCK -->
+<div id="pinScreen" class="hidden">
+  <h2>🔒 Enter PIN</h2>
+  <input type="password" id="pinInput" placeholder="Enter PIN">
+  <button class="encrypt" onclick="unlock()">Unlock</button>
+</div>
+
+<!-- MAIN APP -->
+<div id="app" class="hidden">
+
+<h2>🔐 Secure Message</h2>
+
+<div class="tabs">
+  <button onclick="showTab('encryptTab')">Encrypt</button>
+  <button onclick="showTab('decryptTab')">Decrypt</button>
+</div>
+
+<!-- ENCRYPT TAB -->
+<div id="encryptTab">
+  <textarea id="plainText" placeholder="Write your message here..."></textarea>
+  <button class="encrypt" onclick="encryptMessage()">Encrypt 🔐</button>
+  <textarea id="encryptedText" placeholder="Encrypted message appears here" readonly></textarea>
+
+</div>
+
+<!-- DECRYPT TAB -->
+<div id="decryptTab" class="hidden">
+  <textarea id="cipherInput" placeholder="Paste encrypted message here..."></textarea>
+  <input type="password" id="passphrase" placeholder="Private key passphrase">
+  <button class="decrypt" onclick="decryptMessage()">Decrypt 🔓</button>
+  <textarea id="decryptedText" placeholder="Decrypted message appears here" readonly></textarea>
+
+</div>
+
+<button class="panic" onclick="instantLock()">⏱️ Instant Lock</button>
+<button class="panic" onclick="panicClear()">🚨 Panic Clear</button>
+
+
+<p class="note">Use offline. Clear messages after use.</p>
+
+</div>
+
+<script>
+
+/* ====== PIN ====== */
+function unlock() {
+  const pin = document.getElementById("pinInput").value;
+
+  if (pin === APP_PIN) {
+    // Correct PIN → open secure app
+    document.getElementById("pinInput").value = "";
+    document.getElementById("pinScreen").classList.add("hidden");
+    document.getElementById("app").classList.remove("hidden");
+    resetTimeout();
+  } else {
+    // Decoy behavior → silently return to notes
+    document.getElementById("pinInput").value = "";
+    document.getElementById("pinScreen").classList.add("hidden");
+    document.getElementById("decoyScreen").classList.remove("hidden");
+  }
+}
+
+
+/* ====== CONFIG ====== */
+const APP_PIN = "3022"; // CHANGE THIS PIN
+
+// Load decoy notes (looks real)
+document.getElementById("decoyNotes").value =
+  localStorage.getItem("decoyNotes") || "";
+
+
+const publicKeyArmored = `
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+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
+wcIe+QEhDx/7nZJcAIFM8Oq2hNGNwL/jnA==
+=KJ+H
+-----END PGP PUBLIC KEY BLOCK-----
+`;
+
+const privateKeyArmored = `
+-----BEGIN PGP PRIVATE KEY BLOCK-----
+
+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
+TPDqtoTRjcC/45w=
+=runy
+-----END PGP PRIVATE KEY BLOCK-----
+
+`;
+
+function showFakeSaved() {
+  const toast = document.getElementById("savedToast");
+  toast.classList.remove("hidden");
+  toast.classList.add("show");
+
+  setTimeout(() => {
+    toast.classList.remove("show");
+    toast.classList.add("hidden");
+  }, 900);
+}
+
+
+/* ====== TABS ====== */
+function showTab(tab) {
+  document.getElementById("encryptTab").classList.add("hidden");
+  document.getElementById("decryptTab").classList.add("hidden");
+  document.getElementById(tab).classList.remove("hidden");
+}
+
+/* ====== ENCRYPT ====== */
+async function encryptMessage() {
+  const text = document.getElementById("plainText").value;
+  if (!text) return alert("Write a message");
+
+  const publicKey = await openpgp.readKey({ armoredKey: publicKeyArmored });
+
+  const encrypted = await openpgp.encrypt({
+    message: await openpgp.createMessage({ text }),
+    encryptionKeys: publicKey
+  });
+
+  document.getElementById("encryptedText").value = encrypted;
+  document.getElementById("plainText").value = "";
+}
+
+/* ====== DECRYPT ====== */
+async function decryptMessage() {
+  try {
+    const encrypted = document.getElementById("cipherInput").value;
+    const passphrase = document.getElementById("passphrase").value;
+
+    const privateKey = await openpgp.decryptKey({
+      privateKey: await openpgp.readPrivateKey({ armoredKey: privateKeyArmored }),
+      passphrase
+    });
+
+    const message = await openpgp.readMessage({ armoredMessage: encrypted });
+
+    const { data } = await openpgp.decrypt({
+      message,
+      decryptionKeys: privateKey
+    });
+
+    document.getElementById("decryptedText").value = data;
+  } catch {
+    alert("Decryption failed");
+  }
+}
+
+/* ====== PANIC ====== */
+function panicClear() {
+  document.querySelectorAll("textarea, input").forEach(e => e.value = "");
+}
+function instantLock() {
+  panicClear();
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("pinScreen").classList.remove("hidden");
+}
+
+
+/* ====== AUTO TIMEOUT ====== */
+let timeout;
+const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+function resetTimeout() {
+  clearTimeout(timeout);
+  timeout = setTimeout(() => {
+    panicClear();
+    document.getElementById("app").classList.add("hidden");
+    document.getElementById("pinScreen").classList.remove("hidden");
+    alert("Session locked for safety");
+  }, TIMEOUT_MS);
+}
+
+// Reset timer on activity
+["click", "keydown", "touchstart"].forEach(evt => {
+  document.addEventListener(evt, resetTimeout);
+});
+
+/* ====== SAVE 5-TAP UNLOCK ====== */
+document.addEventListener("DOMContentLoaded", () => {
+  const saveBtn = document.getElementById("saveBtn");
+  const decoyNotes = document.getElementById("decoyNotes");
+
+  let saveCount = 0;
+  let saveTimer = null;
+
+  saveBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    localStorage.setItem("decoyNotes", decoyNotes.value);
+
+    saveCount++;
+    if (!saveTimer) {
+      saveTimer = setTimeout(() => { saveCount = 0; saveTimer = null; }, 7000);
+    }
+
+    if (saveCount >= 5) {
+      saveCount = 0;
+      clearTimeout(saveTimer);
+      saveTimer = null;
+
+      decoyNotes.value = "";
+      document.getElementById("decoyScreen").classList.add("hidden");
+      document.getElementById("pinScreen").classList.remove("hidden");
+    }
+
+    showFakeSaved();
+  });
+
+  // Load previously saved decoy notes
+  decoyNotes.value = localStorage.getItem("decoyNotes") || "";
+});
+
+
+</script>
+
+</body>
+</html>
+
